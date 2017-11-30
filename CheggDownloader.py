@@ -5,6 +5,7 @@ import os
 import requests
 import time
 import sys
+import webbrowser
 
 API_URL = "https://jigsaw.chegg.com/api/v0"
 HTML_HEADERS = {
@@ -27,7 +28,18 @@ IMAGE_HEADERS = {
     'accept-language': "en",
     'cache-control': "no-cache",
 }
+
 JAR = {c.name: c.value for c in cookies.chrome(domain_name='jigsaw.chegg.com')}
+
+
+def prompt_login() -> None:
+    choice = input(
+        "It seems that you have not logged into the Chegg eReader yet.\n"
+        "You can also log in by copying a pasting the following URL into "
+        "Google Chrome:\nhttps://ereader.chegg.com\n"
+        "Would you like to open Google Chrome and log in? (Y/N) ")
+    if choice.lower() == 'y':
+        webbrowser.get('chrome').open('https://ereader.chegg.com')
 
 
 def get_html(isbn: str, start: str, end: str, max_retries: int, retry_delay: int) -> str:
@@ -158,6 +170,9 @@ def main():
 
     verify_args(args)
 
+    if len(JAR) == 0:
+        prompt_login()
+        sys.exit(0)
     try:
         os.makedirs(args.out_dir, exist_ok=True)
     except OSError as e:
