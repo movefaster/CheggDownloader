@@ -2,7 +2,7 @@
 THIS TOOL IS NOT MEANT TO CIRCUMVENT COPYRIGHT PROTECTION. IT SHOULD ONLY BE USED TO DOWNLOAD ETEXTBOOKS THAT **YOU OWN**. REPRODUCING AND/OR DISTRIBUTING COPYRIGHTED WORK IS A CRIME IN MANY COUNTRIES AND JURISDICTIONS. 
 
 # CheggDownloader
-This is a simple Python script that allows you to download an eTextbook from Chegg.com.
+This is a simple Python script that allows you to download an eTextbook from Chegg.com. Output (on the limited sample size that I have) will be stored as a separate PNG file for each page.
 
 ## Requirements
 1. Python 3
@@ -23,6 +23,8 @@ This is a simple Python script that allows you to download an eTextbook from Che
   $ python3 CheggDownloader.py <paste e-ISBN here> <starting page> <ending page> -i <maximum pages you can download at once>
   $ # Example
   $ python3 CheggDownloader.py 1234567890123 1 999 -i 5
+  $ # Download to a specified folder (will be created is doesn't exist)
+  $ python3 CheggDownloader.py 1234567890123 1 999 -i 5 --out-dir=book/
   ```
   
 ### Downloading unnumbered pages
@@ -35,3 +37,35 @@ $ python3 CheggDownloader.py 1234567890123 -p i ii iii iv v
 
 ## Options
 See the help message: `python3 CheggDownloader.py -h`
+```
+usage: CheggDownloader.py [-h] [-i INTERVAL] [-p [PAGES [PAGES ...]]]
+                          [--max-retries MAX_RETRIES]
+                          [--retry-delay RETRY_DELAY] [--book-name BOOK_NAME]
+                          [--out-dir OUT_DIR]
+                          isbn [start] [end]
+
+positional arguments:
+  isbn                  the e-ISBN of the book to download
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --book-name BOOK_NAME
+                        name of the book to download. Default=[Book]
+  --out-dir OUT_DIR     specify a directory to save all images.
+                        Default=[Current Directory]
+
+pages:
+  start                 starting page to download
+  end                   ending page to download
+  -i INTERVAL, --interval INTERVAL
+                        maximum pages to query and download at once
+  -p [PAGES [PAGES ...]], --pages [PAGES [PAGES ...]]
+                        a list of pages to download, separated by space
+
+error handling:
+  --max-retries MAX_RETRIES
+                        maximum number to retry downloading a page if it
+                        fails. Default=[3]
+  --retry-delay RETRY_DELAY
+                        delay in milliseconds between retries. Default=[500]
+```
