@@ -6,6 +6,8 @@ import requests
 import time
 import sys
 import webbrowser
+import json
+import re
 
 API_URL = "https://jigsaw.chegg.com/api/v0"
 HTML_HEADERS = {
@@ -42,21 +44,28 @@ def prompt_login() -> None:
         webbrowser.get('chrome').open('https://ereader.chegg.com')
 
 
-def get_html(isbn: str, start: str, end: str, max_retries: int, retry_delay: int) -> str:
-    url = API_URL + "/books/{:s}/print".format(isbn)
-    querystring = {'from': start, 'to': end}
+def get_response(url, querystring, max_retries, retry_delay) -> str:
     resp = None
     for i in range(0, max_retries):
         resp = requests.get(url, params=querystring, headers=HTML_HEADERS, cookies=JAR)
         if resp.status_code == 200:
             break
-        print("[status={:d} attempt={:d}] Unable to download pages {:s} to {:s}: {:s}"
-              .format(resp.status_code, i, start, end, str(resp.text)))
+        print("[status={:d} attempt={:d}] Unable to download page {:s}: {:s}"
+              .format(resp.status_code, i, url, str(resp.text)))
         time.sleep(retry_delay / 1000)
     if resp:
         return resp.text
     return ""
 
+def get_pages(isbn: str, max_retries: int, retry_delay: int):
+    url = API_URL + "/books/{:s}/pagebreaks".format(isbn)
+    resp = get_response(url, {}, max_retries, retry_delay)
+    return json.loads(resp)
+
+def get_html(isbn: str, start: str, end: str, max_retries: int, retry_delay: int) -> str:
+    url = API_URL + "/books/{:s}/print".format(isbn)
+    querystring = {'from': start, 'to': end}
+    return get_response(url, querystring, max_retries, retry_delay)
 
 def get_image(src: str, out_file: str, max_retries: int, retry_delay: int) -> bool:
     url = API_URL + src
@@ -79,6 +88,23 @@ def get_image(src: str, out_file: str, max_retries: int, retry_delay: int) -> bo
 def get_filename(book_name: str, page_num: str, out_dir: str) -> str:
     filename = '{:s}_{:s}.png'.format(book_name, page_num)
     return os.path.join(out_dir, filename)
+
+
+def download_images(html: str, page: str,
+                   book_name: str, out_dir: str,
+                   max_retries: int, retry_delay: int) -> bool:
+    soup = bs.BeautifulSoup(html, 'html.parser')
+    images = [t['src'] for t in soup.find_all('img')]
+    result = True
+    if len(images) == 0:
+       print('You need to login!')
+    for offset, src in enumerate(images):
+       name = page
+       if offset != 0:
+           name = name + "_" + str(offset)
+       if not get_image(src, get_filename(book_name, name, out_dir), max_retries, retry_delay):
+           result = False
+    return result
 
 
 def download_single(isbn: str, page: str,
@@ -120,16 +146,51 @@ def download_range(isbn: str, start: int, end: int, interval: int,
     start_time = time.time()
     for page in range(start, end, interval):
         html = get_html(isbn, str(page), str(page + interval - 1), max_retries, retry_delay)
-        soup = bs.BeautifulSoup(html, 'html.parser')
-        images = [t['src'] for t in soup.find_all('img')]
-        for offset, src in enumerate(images):
-            if not quiet:
-                print("downloading page {:d}/{:d}".format(page + offset, end))
-            if not get_image(src, get_filename(book_name, str(page + offset), out_dir), max_retries, retry_delay):
-                failed_pages.append(page + offset)
+        if not quiet:
+            print("downloading page {:d}/{:d}".format(page, end))
+        result = download_images(html, page, book_name, out_dir, max_retries, retry_delay)
+        if not result:
+            failed_pages.append(page + offset)
     end_time = time.time()
     print("downloaded {:d} pages in {:6.3f} seconds"
           .format((end - start) - len(failed_pages) + 1, end_time - start_time))
+    if failed_pages:
+        print("failed pages: {:s}".format(str(failed_pages)))
+
+def download_all(isbn: str, book_name: str, out_dir: str,
+                 max_retries: int, retry_delay: int,
+                 quiet: bool=False) -> None:
+    failed_pages = []
+    start_time = time.time()
+    pages = get_pages(isbn, max_retries, retry_delay)
+    with open(os.path.join(out_dir, "{:s}_pages.json".format(book_name)), "w") as f:
+        json.dump(pages, f)
+
+    downloaded_urls = []
+
+    for page in pages:
+        match = re.search(r"^[^!]*/(\d+)(!.*)?$", page["cfiWithoutAssertions"])
+        pagenum = match.group(1)
+        label = page["label"]
+        if not quiet:
+            print("downloading page {:s} ({:s}/{:d})".format(label, pagenum, len(pages)))
+
+        if page["url"] in downloaded_urls:
+            continue
+
+        url = API_URL + page["url"]
+        html = get_response(url, {}, max_retries, retry_delay)
+        downloaded_urls.append(url)
+        with open(os.path.join(out_dir, "{:s}_{:s}.html".format(book_name, pagenum)), "wb") as f:
+           f.write(html.encode("utf-8"))
+        result = download_images(html, pagenum, book_name, out_dir, max_retries, retry_delay)
+        if not result:
+            failed_pages.append(pagenum)
+            break
+
+    end_time = time.time()
+    print("downloaded {:d} pages in {:6.3f} seconds"
+          .format(len(pages) - len(failed_pages) + 1, end_time - start_time))
     if failed_pages:
         print("failed pages: {:s}".format(str(failed_pages)))
 
@@ -180,14 +241,23 @@ def main():
               .format(args.out_dir, e))
 
     if args.pages:
-        download_list(
-            args.isbn,
-            args.pages,
-            args.book_name,
-            args.out_dir,
-            args.max_retries,
-            args.retry_delay,
-        )
+        if 'all' in args.pages:
+            download_all(
+                args.isbn,
+                args.book_name,
+                args.out_dir,
+                args.max_retries,
+                args.retry_delay,
+            )
+        else:
+            download_list(
+                args.isbn,
+                args.pages,
+                args.book_name,
+                args.out_dir,
+                args.max_retries,
+                args.retry_delay,
+            )
     else:
         download_range(
             args.isbn,
